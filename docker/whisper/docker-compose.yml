@@ -1,0 +1,15 @@
+# Local faster-whisper (base model, CPU) with an OpenAI-compatible API.
+# Start:  docker compose up -d --build
+# Logs:   docker compose logs -f
+# Stop:   docker compose down
+services:
+  whisper:
+    build: .
+    container_name: watch-whisper
+    restart: unless-stopped
+    env_file:
+      - whisper.env
+    ports:
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - ./data:/root/.cache

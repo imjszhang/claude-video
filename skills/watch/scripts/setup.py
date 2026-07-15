@@ -46,11 +46,16 @@ ENV_TEMPLATE = """# /watch API configuration
 # Get a Groq key:  https://console.groq.com/keys
 # Get an OpenAI key:  https://platform.openai.com/api-keys
 #
-# Leave both blank to disable Whisper — /watch will still work, but videos
-# without native captions will come back frames-only.
+# Leave both blank to disable cloud Whisper — /watch will still work, but videos
+# without native captions will come back frames-only unless LOCAL_WHISPER_URL is set.
 
 GROQ_API_KEY=
 OPENAI_API_KEY=
+
+# Local Whisper (Docker). OpenAI-compatible faster-whisper server on this machine.
+# Example stack: docker compose -f docker/whisper/docker-compose.yml up -d
+# LOCAL_WHISPER_URL=http://127.0.0.1:9000/v1/audio/transcriptions
+# LOCAL_WHISPER_MODEL=whisper-1
 
 # Default watch behavior (the /watch first-run wizard sets this for you).
 # Allowed values: transcript | efficient | balanced | token-burner
@@ -114,6 +119,8 @@ def _read_env_key(name: str) -> str | None:
 
 
 def _have_api_key() -> tuple[bool, str | None]:
+    if _read_env_key("LOCAL_WHISPER_URL"):
+        return True, "local"
     if _read_env_key("GROQ_API_KEY"):
         return True, "groq"
     if _read_env_key("OPENAI_API_KEY"):
@@ -276,7 +283,7 @@ def cmd_check() -> int:
     if s["missing_binaries"]:
         parts.append(f"missing binaries: {', '.join(s['missing_binaries'])}")
     if not s["has_api_key"] and not s["setup_complete"]:
-        parts.append("no Whisper API key (GROQ_API_KEY or OPENAI_API_KEY)")
+        parts.append("no Whisper backend (LOCAL_WHISPER_URL, GROQ_API_KEY, or OPENAI_API_KEY)")
     installer = Path(__file__).resolve()
     sys.stderr.write(
         f"[watch] setup incomplete ({'; '.join(parts)}). "
@@ -340,13 +347,14 @@ def cmd_install() -> int:
         return 0
 
     print("")
-    print("[setup] one step left: add a Whisper API key.")
+    print("[setup] one step left: add a Whisper backend.")
     print("")
-    print(f"  Edit {CONFIG_FILE} and set either:")
-    print("    GROQ_API_KEY=...    (preferred — cheaper, faster; get one at console.groq.com/keys)")
-    print("    OPENAI_API_KEY=...  (fallback; get one at platform.openai.com/api-keys)")
+    print(f"  Edit {CONFIG_FILE} and set one of:")
+    print("    LOCAL_WHISPER_URL=http://127.0.0.1:9000/v1/audio/transcriptions  (local Docker; see docker/whisper/)")
+    print("    GROQ_API_KEY=...    (preferred cloud — cheaper, faster; get one at console.groq.com/keys)")
+    print("    OPENAI_API_KEY=...  (cloud fallback; get one at platform.openai.com/api-keys)")
     print("")
-    print("  Without a key, /watch still works but videos without captions come back frames-only.")
+    print("  Without any backend, /watch still works but videos without captions come back frames-only.")
     return 3
 
 

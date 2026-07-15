@@ -56,9 +56,9 @@ def main() -> int:
     )
     ap.add_argument(
         "--whisper",
-        choices=["groq", "openai"],
+        choices=["local", "groq", "openai"],
         default=None,
-        help="Force a specific Whisper backend. Default: prefer Groq, fall back to OpenAI.",
+        help="Force a specific Whisper backend. Default: prefer local Docker, then Groq, then OpenAI.",
     )
     ap.add_argument(
         "--no-dedup",
@@ -253,9 +253,9 @@ def main() -> int:
                 print(f"[watch] whisper fallback failed: {exc}", file=sys.stderr)
         else:
             hint = (
-                f"--whisper {args.whisper} was set but the matching API key is missing"
+                f"--whisper {args.whisper} was set but the matching Whisper backend is missing"
                 if args.whisper else
-                "no subtitles and no Whisper API key found"
+                "no subtitles and no Whisper backend found"
             )
             setup_py = SCRIPT_DIR / "setup.py"
             print(

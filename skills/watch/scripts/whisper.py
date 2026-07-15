@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Transcribe a video via Groq or OpenAI Whisper API.
+"""Transcribe a video via local Whisper, Groq, or OpenAI Whisper API.
 
 Strategy: extract audio (mono 16kHz mp3, tiny payload), upload to whichever
 API has a key. Returns segments in the same shape as transcribe.parse_vtt so
@@ -32,6 +32,9 @@ GROQ_MODEL = "whisper-large-v3"
 OPENAI_ENDPOINT = "https://api.openai.com/v1/audio/transcriptions"
 OPENAI_MODEL = "whisper-1"
 
+LOCAL_WHISPER_DEFAULT = "http://127.0.0.1:9000/v1/audio/transcriptions"
+LOCAL_WHISPER_MODEL_DEFAULT = "whisper-1"
+
 # Both Groq's free tier and OpenAI whisper-1 cap uploads at 25 MB. We target a
 # margin under that so multipart framing overhead never pushes a chunk over.
 MAX_UPLOAD_BYTES = 24 * 1024 * 1024
@@ -62,50 +65,56 @@ def plan_chunks(
     return plan
 
 
-def load_api_key(preferred: str | None = None) -> tuple[str, str] | tuple[None, None]:
-    """Return (backend, api_key). Prefers Groq, falls back to OpenAI.
+def _dotenv_paths() -> list[Path]:
+    return [
+        Path.home() / ".config" / "watch" / ".env",
+        Path.cwd() / ".env",
+    ]
 
-    If `preferred` is "groq" or "openai", only that backend's key is considered.
-    """
-    def _from_env(name: str) -> str | None:
-        value = os.environ.get(name)
-        return value.strip() if value else None
 
-    def _from_dotenv(path: Path, name: str) -> str | None:
+def _read_config_value(name: str) -> str | None:
+    value = os.environ.get(name)
+    if value and value.strip():
+        return value.strip()
+    for path in _dotenv_paths():
         if not path.exists():
-            return None
+            continue
         try:
             for line in path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
                     continue
-                key, _, value = line.partition("=")
+                key, _, raw = line.partition("=")
                 if key.strip() != name:
                     continue
-                value = value.strip()
-                if len(value) >= 2 and value[0] in ('"', "'") and value[-1] == value[0]:
-                    value = value[1:-1]
-                return value or None
+                raw = raw.strip()
+                if len(raw) >= 2 and raw[0] in ('"', "'") and raw[-1] == raw[0]:
+                    raw = raw[1:-1]
+                return raw or None
         except OSError:
-            return None
-        return None
+            continue
+    return None
 
-    dotenv_paths = [
-        Path.home() / ".config" / "watch" / ".env",
-        Path.cwd() / ".env",
-    ]
+
+def local_whisper_endpoint() -> str | None:
+    return _read_config_value("LOCAL_WHISPER_URL")
+
+
+def load_api_key(preferred: str | None = None) -> tuple[str, str] | tuple[None, None]:
+    """Return (backend, api_key). Prefers local, then Groq, then OpenAI.
+
+    If `preferred` is "local", "groq", or "openai", only that backend is considered.
+    """
+    if preferred is None or preferred == "local":
+        if local_whisper_endpoint():
+            return "local", "local"
 
     candidates = (("GROQ_API_KEY", "groq"), ("OPENAI_API_KEY", "openai"))
-    if preferred is not None:
+    if preferred is not None and preferred != "local":
         candidates = tuple(c for c in candidates if c[1] == preferred)
 
     for key_name, backend in candidates:
-        value = _from_env(key_name)
-        if not value:
-            for candidate in dotenv_paths:
-                value = _from_dotenv(candidate, key_name)
-                if value:
-                    break
+        value = _read_config_value(key_name)
         if value:
             return backend, value
 
@@ -406,6 +415,10 @@ def _transcribe_file(backend: str, api_key: str, audio_path: Path) -> list[dict]
         response = _post_whisper(GROQ_ENDPOINT, api_key, GROQ_MODEL, audio_path)
     elif backend == "openai":
         response = _post_whisper(OPENAI_ENDPOINT, api_key, OPENAI_MODEL, audio_path)
+    elif backend == "local":
+        endpoint = local_whisper_endpoint() or LOCAL_WHISPER_DEFAULT
+        model = _read_config_value("LOCAL_WHISPER_MODEL") or LOCAL_WHISPER_MODEL_DEFAULT
+        response = _post_whisper(endpoint, api_key, model, audio_path)
     else:
         raise SystemExit(f"Unknown whisper backend: {backend}")
     return _segments_from_response(response)
@@ -429,9 +442,9 @@ def transcribe_video(
     if not backend or not api_key:
         setup_py = Path(__file__).resolve().parent / "setup.py"
         raise SystemExit(
-            "No Whisper API key available. Set GROQ_API_KEY (preferred) or OPENAI_API_KEY "
-            "in the environment or in ~/.config/watch/.env. "
-            f"Run `python3 {setup_py}` to configure."
+            "No Whisper backend available. Set LOCAL_WHISPER_URL for a local Docker server, "
+            "or set GROQ_API_KEY (preferred) or OPENAI_API_KEY in the environment or in "
+            f"~/.config/watch/.env. Run `python3 {setup_py}` to configure."
         )
 
     print(f"[watch] extracting audio for Whisper ({backend})…", file=sys.stderr)
@@ -467,7 +480,7 @@ def transcribe_video(
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: whisper.py <video-path> [<audio-out.mp3>] [--backend groq|openai]", file=sys.stderr)
+        print("usage: whisper.py <video-path> [<audio-out.mp3>] [--backend local|groq|openai]", file=sys.stderr)
         raise SystemExit(2)
 
     video = sys.argv[1]
