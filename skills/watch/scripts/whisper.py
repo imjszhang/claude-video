@@ -100,6 +100,10 @@ def local_whisper_endpoint() -> str | None:
     return _read_config_value("LOCAL_WHISPER_URL")
 
 
+def local_whisper_api_key() -> str:
+    return _read_config_value("LOCAL_WHISPER_API_KEY") or "local"
+
+
 def load_api_key(preferred: str | None = None) -> tuple[str, str] | tuple[None, None]:
     """Return (backend, api_key). Prefers local, then Groq, then OpenAI.
 
@@ -107,7 +111,7 @@ def load_api_key(preferred: str | None = None) -> tuple[str, str] | tuple[None, 
     """
     if preferred is None or preferred == "local":
         if local_whisper_endpoint():
-            return "local", "local"
+            return "local", local_whisper_api_key()
 
     candidates = (("GROQ_API_KEY", "groq"), ("OPENAI_API_KEY", "openai"))
     if preferred is not None and preferred != "local":
